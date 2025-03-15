@@ -1,12 +1,55 @@
 
 package View;
 
+import java.util.regex.Pattern;
+
+import javax.swing.JOptionPane;
+
 public class Register extends javax.swing.JPanel {
 
     public Frame frame;
+
+    // Password pattern: Min 8 chars, at least one digit, one lowercase, one uppercase
+    private static final Pattern PASSWORD_PATTERN = 
+        Pattern.compile("^(?=.*[0-9])(?=.*[a-z])(?=.*[A-Z]).{8,64}$");
     
     public Register() {
         initComponents();
+    }
+
+    private boolean validateInputs() {
+        // Validate username (not empty)
+        if (usernameFld.getText().trim().isEmpty()) {
+            JOptionPane.showMessageDialog(this, 
+                "Username cannot be empty", 
+                "Registration Error", 
+                JOptionPane.ERROR_MESSAGE);
+            return false;
+        }
+        
+        // Validate password complexity
+        String password = new String(passwordFld.getText());
+        if (!PASSWORD_PATTERN.matcher(password).matches()) {
+            JOptionPane.showMessageDialog(this, 
+                "Password must be 8-64 characters and include at least:\n" +
+                "- One uppercase letter\n" +
+                "- One lowercase letter\n" +
+                "- One digit", 
+                "Registration Error", 
+                JOptionPane.ERROR_MESSAGE);
+            return false;
+        }
+        
+        // Validate password match
+        if (!password.equals(new String(confpassFld.getText()))) {
+            JOptionPane.showMessageDialog(this, 
+                "Passwords do not match", 
+                "Registration Error", 
+                JOptionPane.ERROR_MESSAGE);
+            return false;
+        }
+        
+        return true;
     }
 
     @SuppressWarnings("unchecked")
@@ -97,8 +140,22 @@ public class Register extends javax.swing.JPanel {
     }// </editor-fold>//GEN-END:initComponents
 
     private void registerBtnActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_registerBtnActionPerformed
-        frame.registerAction(usernameFld.getText(), passwordFld.getText(), confpassFld.getText());
-        frame.loginNav();
+        if (validateInputs()) {
+            boolean success = frame.registerAction(usernameFld.getText(), passwordFld.getText(), confpassFld.getText());
+            if (success) {
+                JOptionPane.showMessageDialog(this, 
+                    "Registration successful. You can now log in.", 
+                    "Registration Complete", 
+                    JOptionPane.INFORMATION_MESSAGE);
+                frame.loginNav();
+            } else {
+                // Generic error message that doesn't reveal if username exists
+                JOptionPane.showMessageDialog(this, 
+                    "Registration failed. Please try again with different credentials.", 
+                    "Registration Error", 
+                    JOptionPane.ERROR_MESSAGE);
+            }
+        }
     }//GEN-LAST:event_registerBtnActionPerformed
 
     private void backBtnActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_backBtnActionPerformed
