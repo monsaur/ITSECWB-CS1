@@ -10,6 +10,11 @@ import java.sql.DriverManager;
 import java.sql.ResultSet;
 import java.sql.Statement;
 import java.util.ArrayList;
+import java.sql.*;  
+import java.sql.PreparedStatement; 
+
+import org.mindrot.jbcrypt.BCrypt;
+import Controller.SQLite;
 
 public class SQLite {
     
@@ -26,6 +31,18 @@ public class SQLite {
             System.out.print(ex);
         }
     }
+    
+    public void enableWALMode() {
+    String query = "PRAGMA journal_mode=WAL;";
+
+    try (Connection conn = DriverManager.getConnection(driverURL);
+         Statement stmt = conn.createStatement()) {
+        stmt.execute(query);
+        System.out.println("✅ SQLite WAL mode enabled!");
+    } catch (SQLException e) {
+        e.printStackTrace();
+    }
+}
     
     public void createHistoryTable() {
         String sql = "CREATE TABLE IF NOT EXISTS history (\n"
@@ -77,28 +94,30 @@ public class SQLite {
             System.out.println("Table product in database.db created.");
         } catch (Exception ex) {
             System.out.print(ex);
+             System.out.println("❌ ERROR creating `users` table: " + ex.getMessage());
         }
     }
      
     public void createUserTable() {
         String sql = "CREATE TABLE IF NOT EXISTS users (\n"
-            + " id INTEGER PRIMARY KEY AUTOINCREMENT,\n"
-            + " username TEXT NOT NULL UNIQUE,\n"
-            + " password TEXT NOT NULL,\n"
-            + " salt TEXT NOT NULL,\n"
-            + " role INTEGER DEFAULT 2,\n"
-            + " locked INTEGER DEFAULT 0,\n"
-            + " failed_attempts INTEGER DEFAULT 0\n"
-            + ");";
-    
+                + " id INTEGER PRIMARY KEY AUTOINCREMENT,\n"
+                + " username TEXT NOT NULL UNIQUE,\n"
+                + " password TEXT NOT NULL,\n"
+                + " role INTEGER DEFAULT 2,\n"
+                + " failed_attempts INTEGER DEFAULT 0,\n"
+                + " locked INTEGER DEFAULT 0\n"
+                + ");";
+
         try (Connection conn = DriverManager.getConnection(driverURL);
-            Statement stmt = conn.createStatement()) {
+             Statement stmt = conn.createStatement()) {
             stmt.execute(sql);
             System.out.println("Table users in database.db created.");
         } catch (Exception ex) {
             System.out.print(ex);
         }
     }
+    
+   
     
     public void dropHistoryTable() {
         String sql = "DROP TABLE IF EXISTS history;";
@@ -263,7 +282,7 @@ public class SQLite {
     }
     
     public ArrayList<User> getUsers(){
-        String sql = "SELECT id, username, password, salt, role, locked FROM users";
+        String sql = "SELECT id, username, password, role, locked FROM users";
         ArrayList<User> users = new ArrayList<User>();
         
         try (Connection conn = DriverManager.getConnection(driverURL);
@@ -274,7 +293,6 @@ public class SQLite {
                 users.add(new User(rs.getInt("id"),
                                    rs.getString("username"),
                                    rs.getString("password"),
-                                   rs.getString("salt"),
                                    rs.getInt("role"),
                                    rs.getInt("locked")));
             }
@@ -321,4 +339,152 @@ public class SQLite {
         return product;
     }
     
+     public boolean authenticateUser(String username, String password) {
+    if (isAccountLocked(username)) {
+        System.out.println("🚫 Account is locked: " + username);
+        return false;
+    }
+
+    String query = "SELECT password FROM users WHERE username = ?";
+    
+    try (Connection conn = DriverManager.getConnection(driverURL);
+         PreparedStatement stmt = conn.prepareStatement(query)) {
+        stmt.setString(1, username);
+        ResultSet rs = stmt.executeQuery();
+        
+        if (rs.next()) {
+            String storedHashedPassword = rs.getString("password");
+            boolean isPasswordCorrect = BCrypt.checkpw(password, storedHashedPassword);
+            
+            if (isPasswordCorrect) {
+                resetFailedAttempts(username);  // ✅ Reset failed attempts on successful login
+                return true;
+            } else {
+                incrementFailedAttempts(username);  // ✅ Increase failed attempts on wrong password
+            }
+        }
+    } catch (SQLException e) {
+        e.printStackTrace();
+    }
+    return false;
+}
+
+  public void incrementFailedAttempts(String username) {
+    String query = "UPDATE users SET failed_attempts = failed_attempts + 1 WHERE username = ?";
+
+    try (Connection conn = DriverManager.getConnection(driverURL);
+         PreparedStatement stmt = conn.prepareStatement(query)) {
+        stmt.setString(1, username);
+        stmt.executeUpdate();
+
+        // Get current failed attempts
+        int failedAttempts = getFailedAttempts(username);
+
+        // If failed attempts reach 5, lock the account
+        if (failedAttempts >= 5) {
+            lockAccount(username);
+        } else if (failedAttempts >= 3) { 
+            int delay = (int) Math.pow(2, failedAttempts - 2);
+            System.out.println("⚠️ Login delayed for " + delay + " seconds due to multiple failed attempts.");
+            Thread.sleep(delay * 1000);
+        }
+    } catch (SQLException | InterruptedException e) {
+        e.printStackTrace();
+    }
+}
+
+
+private int getFailedAttempts(String username) {
+    String query = "SELECT failed_attempts FROM users WHERE username = ?";
+    try (Connection conn = DriverManager.getConnection(driverURL);
+         PreparedStatement stmt = conn.prepareStatement(query)) {
+        stmt.setString(1, username);
+        ResultSet rs = stmt.executeQuery();
+        if (rs.next()) {
+            return rs.getInt("failed_attempts");
+        }
+    } catch (SQLException e) {
+        e.printStackTrace();
+    }
+    return 0; 
+}
+   
+   public boolean isAccountLocked(String username) {
+    String query = "SELECT failed_attempts, locked FROM users WHERE username = ?";
+    
+    try (Connection conn = DriverManager.getConnection(driverURL);
+         PreparedStatement stmt = conn.prepareStatement(query)) {
+        stmt.setString(1, username);
+        ResultSet rs = stmt.executeQuery();
+
+        if (rs.next()) {
+            int failedAttempts = rs.getInt("failed_attempts");
+            int locked = rs.getInt("locked");
+
+            if (failedAttempts >= 5) {
+                lockAccount(username);  
+                return true;
+            }
+            return locked == 1; 
+        }
+    } catch (SQLException e) {
+        e.printStackTrace();
+    }
+    return false;
+}
+
+   public void lockAccount(String username) {
+    String query = "UPDATE users SET locked = 1 WHERE username = ?";
+
+    try (Connection conn = DriverManager.getConnection(driverURL);
+         PreparedStatement stmt = conn.prepareStatement(query)) {
+        stmt.setString(1, username);
+        stmt.executeUpdate();
+        System.out.println("🚫 Account locked for user: " + username);
+    } catch (SQLException e) {
+        e.printStackTrace();
+    }
+}
+
+
+    public void resetFailedAttempts(String username) {
+        String query = "UPDATE users SET failed_attempts = 0 WHERE username = ?";
+        try (Connection conn = DriverManager.getConnection(driverURL);
+             PreparedStatement stmt = conn.prepareStatement(query)) {
+            stmt.setString(1, username);
+            stmt.executeUpdate();
+        } catch (SQLException e) {
+            e.printStackTrace();
+            
+        } 
+        
+        
+    }
+    
+  
+
+
+
+   public void addTestUser() {
+    String username = "testuser";
+    String password = "password123";  // Plaintext password for testing
+    String hashedPassword = org.mindrot.jbcrypt.BCrypt.hashpw(password, org.mindrot.jbcrypt.BCrypt.gensalt(12));
+
+    String sql = "INSERT INTO users (username, password, role, failed_attempts, locked) VALUES (?, ?, ?, 0, 0)";
+
+    try (Connection conn = DriverManager.getConnection(driverURL);
+         PreparedStatement stmt = conn.prepareStatement(sql)) {
+        stmt.setString(1, username);
+        stmt.setString(2, hashedPassword);
+        stmt.setInt(3, 2);  // Role 2 = Regular User (change as needed)
+        stmt.executeUpdate();
+        System.out.println("✅ Test user 'testuser' added successfully!");
+    } catch (SQLException e) {
+        if (e.getMessage().contains("UNIQUE constraint failed")) {
+            System.out.println("⚠️ Test user 'testuser' already exists.");
+        } else {
+            e.printStackTrace();
+        }
+    }
+} 
 }

@@ -1,5 +1,7 @@
-
 package View;
+
+import Controller.SQLite;  
+import javax.swing.JOptionPane;  
 
 public class Login extends javax.swing.JPanel {
 
@@ -83,7 +85,27 @@ public class Login extends javax.swing.JPanel {
         );
     }// </editor-fold>//GEN-END:initComponents
     private void loginBtnActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_loginBtnActionPerformed
-        frame.mainNav();
+        
+        String username = usernameFld.getText().trim();
+    String password = passwordFld.getText().trim(); 
+    
+
+    if (username.isEmpty() || password.isEmpty()) {
+        JOptionPane.showMessageDialog(this, "Username and password cannot be empty!", "Login Error", JOptionPane.ERROR_MESSAGE);
+        return;  
+    }
+
+    SQLite sqlite = new SQLite();
+
+    if (sqlite.isAccountLocked(username)) {
+        JOptionPane.showMessageDialog(this, "Too many failed attempts! Account locked.", "Account Locked", JOptionPane.ERROR_MESSAGE);
+    } else if (sqlite.authenticateUser(username, password)) {
+        JOptionPane.showMessageDialog(this, "Login successful!", "Success", JOptionPane.INFORMATION_MESSAGE);
+        frame.mainNav(); 
+    } else {
+        JOptionPane.showMessageDialog(this, "Invalid username or password!", "Login Failed", JOptionPane.ERROR_MESSAGE);
+    }
+        
     }//GEN-LAST:event_loginBtnActionPerformed
 
     private void registerBtnActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_registerBtnActionPerformed
